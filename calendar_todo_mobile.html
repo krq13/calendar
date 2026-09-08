@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<title>캘린더 · 할 일</title>
+<style>
+  :root{
+    --bg:#FFFFFF;
+    --panel:#FAFAFA;
+    --line:#E5E5E5;
+    --line-strong:#D9D9D9;
+    --text:#202124;
+    --text-dim:#8A8F98;
+    --sunday:#D93025;
+    --saturday:#2E6DA4;
+    --today-bg:#202124;
+    --task-done:#9AA0A6;
+    --accent:#2E6DA4;
+    --sheet-radius:20px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family:'Pretendard','-apple-system','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    height:100%;
+    overscroll-behavior-y:none;
+  }
+  #app{max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--bg);}
+
+  /* ---- Header ---- */
+  header{
+    position:sticky; top:0; z-index:5; background:var(--bg);
+    padding:14px 16px 8px; border-bottom:1px solid var(--line);
+  }
+  .month-row{display:flex; align-items:baseline; justify-content:center; gap:8px;}
+  .month-row .nav-btn{
+    background:none; border:none; font-size:20px; color:var(--text-dim);
+    padding:8px 10px; cursor:pointer; line-height:1;
+  }
+  .month-row .nav-btn:active{color:var(--text);}
+  .month-title{font-size:22px; font-weight:700; letter-spacing:-0.3px;}
+  .year-title{font-size:13px; color:var(--text-dim); font-weight:500;}
+  .sub-row{display:flex; align-items:center; justify-content:space-between; margin-top:6px;}
+  .today-btn{
+    background:none; border:1px solid var(--line-strong); border-radius:20px;
+    font-size:12px; color:var(--text-dim); padding:5px 12px; cursor:pointer;
+  }
+  .demo-badge{font-size:11px; color:var(--text-dim); background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:5px 10px;}
+
+  /* ---- Weekday header ---- */
+  .weekday-row{display:grid; grid-template-columns:repeat(7,1fr); padding:6px 4px 2px;}
+  .weekday-row div{text-align:center; font-size:12px; font-weight:700; padding:6px 0; color:var(--text);}
+  .weekday-row div.sun{color:var(--sunday);}
+  .weekday-row div.sat{color:var(--saturday);}
+
+  /* ---- Calendar grid ---- */
+  .grid{display:grid; grid-template-columns:repeat(7,1fr); border-top:1px solid var(--line);}
+  .cell{
+    border-right:1px solid var(--line); border-bottom:1px solid var(--line);
+    min-height:70px; padding:4px 3px 5px; position:relative; cursor:pointer;
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .cell:nth-child(7n){border-right:none;}
+  .cell.other-month{background:#FCFCFC;}
+  .cell.other-month .date-num{color:#D5D5D5;}
+  .cell.other-month .item{opacity:0.45;}
+  .cell:active{background:#F5F7F8;}
+  .date-num{
+    font-size:12px; font-weight:700; width:20px; height:20px; line-height:20px;
+    text-align:center; border-radius:50%; color:var(--text);
+  }
+  .date-num.sun{color:var(--sunday);}
+  .date-num.sat{color:var(--saturday);}
+  .date-num.holiday{color:var(--sunday);}
+  .date-num.today{background:var(--today-bg); color:#fff;}
+  .holiday-label{font-size:8.5px; color:var(--sunday); font-weight:600; margin-top:-2px;}
+
+  .item{font-size:9.5px; line-height:13px; padding:0 2px; border-radius:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .item.event{font-weight:700;}
+  .item.task{font-weight:400; color:var(--text); display:flex; align-items:flex-start; gap:3px;}
+  .item.task.done{color:var(--task-done); text-decoration:line-through;}
+  .item.task .box{
+    width:8px; height:8px; border:1.4px solid var(--text-dim); border-radius:1.5px; flex:none;
+  }
+  .item.task.done .box{background:var(--task-done); border-color:var(--task-done);}
+  .more-label{font-size:9px; color:var(--text-dim); padding:0 2px;}
+
+  /* ---- Bottom sheet ---- */
+  .overlay{position:fixed; inset:0; background:rgba(0,0,0,0.35); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:10;}
+  .overlay.open{opacity:1; pointer-events:auto;}
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; max-width:480px; margin:0 auto;
+    background:#fff; border-radius:var(--sheet-radius) var(--sheet-radius) 0 0;
+    transform:translateY(100%); transition:transform .25s cubic-bezier(.32,.72,0,1);
+    z-index:11; max-height:85vh; display:flex; flex-direction:column;
+    box-shadow:0 -8px 30px rgba(0,0,0,0.12);
+  }
+  .sheet.open{transform:translateY(0);}
+  .sheet-handle{width:36px; height:4px; background:var(--line-strong); border-radius:3px; margin:10px auto 4px;}
+  .sheet-head{display:flex; align-items:center; justify-content:space-between; padding:8px 18px 12px; border-bottom:1px solid var(--line);}
+  .sheet-head .date-title{font-size:16px; font-weight:700;}
+  .sheet-head .close-btn{background:none; border:none; font-size:18px; color:var(--text-dim); padding:6px; cursor:pointer;}
+  .sheet-body{overflow-y:auto; padding:6px 18px 24px;}
+
+  .section-title{font-size:12px; font-weight:700; color:var(--text-dim); margin:16px 0 8px;}
+  .row{display:flex; align-items:center; gap:8px; padding:7px 0;}
+  .row .swatch{width:9px; height:9px; border-radius:2px; flex:none;}
+  .row .label{flex:1; font-size:14px; font-weight:700;}
+  .row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
+
+  .task-row{display:flex; align-items:center; gap:9px; padding:7px 0;}
+  .task-row .box{
+    width:18px; height:18px; border:1.6px solid var(--text-dim); border-radius:4px; flex:none; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .task-row .box.checked{background:var(--text); border-color:var(--text);}
+  .task-row .box.checked::after{content:''; width:8px; height:5px; border-left:2px solid #fff; border-bottom:2px solid #fff; transform:rotate(-45deg) translateY(-1px);}
+  .task-row .label{flex:1; font-size:14px;}
+  .task-row .label.done{color:var(--task-done); text-decoration:line-through;}
+  .task-row .order-btns{display:flex; gap:2px;}
+  .task-row .order-btns button{background:none; border:none; color:var(--text-dim); font-size:12px; padding:5px; cursor:pointer;}
+  .task-row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
+
+  .add-row{display:flex; gap:8px; margin-top:6px;}
+  .add-row input{
+    flex:1; border:1px solid var(--line-strong); border-radius:8px; padding:9px 11px;
+    font-size:14px; font-family:inherit; background:var(--panel);
+  }
+  .add-row input:focus{outline:none; border-color:var(--accent); background:#fff;}
+  .add-row button{
+    background:var(--text); color:#fff; border:none; border-radius:8px; padding:0 16px;
+    font-size:13px; font-weight:700; cursor:pointer;
+  }
+  .color-picker{display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 2px;}
+  .color-picker .sw{width:22px; height:22px; border-radius:50%; cursor:pointer; border:2px solid transparent;}
+  .color-picker .sw.selected{border-color:var(--text);}
+  .empty-hint{font-size:12.5px; color:var(--text-dim); padding:4px 0 2px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="month-row">
+      <button class="nav-btn" id="prevBtn">‹</button>
+      <span class="month-title" id="monthTitle">8월</span>
+      <span class="year-title" id="yearTitle">2026</span>
+      <button class="nav-btn" id="nextBtn">›</button>
+    </div>
+    <div class="sub-row">
+      <button class="today-btn" id="todayBtn">오늘</button>
+      <span class="demo-badge">샘플 데이터 · 구글 연동 예정</span>
+    </div>
+  </header>
+  <div class="weekday-row" id="weekdayRow"></div>
+  <div class="grid" id="grid"></div>
+</div>
+
+<div class="overlay" id="overlay"></div>
+<div class="sheet" id="sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-head">
+    <span class="date-title" id="sheetDateTitle"></span>
+    <button class="close-btn" id="closeSheet">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div class="section-title">일정</div>
+    <div id="eventList"></div>
+    <div class="color-picker" id="colorPicker"></div>
+    <div class="add-row">
+      <input type="text" id="eventInput" placeholder="일정 추가...">
+      <button id="addEventBtn">추가</button>
+    </div>
+
+    <div class="section-title">할 일</div>
+    <div id="taskList"></div>
+    <div class="add-row">
+      <input type="text" id="taskInput" placeholder="할 일 추가...">
+      <button id="addTaskBtn">추가</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- 색상 팔레트 (구글 캘린더 색상 체계와 동일한 이름/값) ----------
+  var PALETTE = [
+    {name:"흑연", id:"8", hex:"#616161"},
+    {name:"라벤더", id:"1", hex:"#A4BDFC"},
+    {name:"세이지", id:"2", hex:"#7AE7BF"},
+    {name:"포도", id:"3", hex:"#DBADFF"},
+    {name:"벚꽃", id:"4", hex:"#FF887C"},
+    {name:"바나나", id:"5", hex:"#FBD75B"},
+    {name:"귤", id:"6", hex:"#FFB878"},
+    {name:"코발트", id:"7", hex:"#46D6DB"},
+    {name:"블루베리", id:"9", hex:"#5484ED"},
+    {name:"바질", id:"10", hex:"#51B749"},
+    {name:"토마토", id:"11", hex:"#DC2127"}
+  ];
+
+  // 날짜(월/일)만으로 결정되는 고정 공휴일만 표시 (설/추석 등 음력 공휴일은
+  // 실제 구글 "대한민국의 공휴일" 캘린더 연동 후 정확하게 대체될 예정)
+  var FIXED_HOLIDAYS = {
+    "01-01":"신정", "03-01":"삼일절", "05-05":"어린이날",
+    "06-06":"현충일", "08-15":"광복절", "10-03":"개천절",
+    "10-09":"한글날", "12-25":"크리스마스"
+  };
+
+  var STORAGE_KEY = "calendar_todo_mobile_data_v1";
+
+  function pad(n){ return n<10 ? "0"+n : ""+n; }
+  function dateKey(y,m,d){ return y+"-"+pad(m+1)+"-"+pad(d); }
+  function todayKey(){ var t=new Date(); return dateKey(t.getFullYear(), t.getMonth(), t.getDate()); }
+
+  function seedData(){
+    var t = new Date();
+    var y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
+    var k1 = dateKey(y,m,d);
+    var k2 = dateKey(y,m, Math.min(d+2, 28));
+    var k3 = dateKey(y,m, Math.min(d+5, 28));
+    return {
+      events:[
+        {id:"e1", date:k1, title:"팀 회의", colorId:"9"},
+        {id:"e2", date:k2, title:"친구 생일", colorId:"4"},
+        {id:"e3", date:k3, title:"병원 예약", colorId:"3"}
+      ],
+      tasks:[
+        {id:"t1", date:k1, title:"장보기", status:"needsAction"},
+        {id:"t2", date:k1, title:"빨래하기", status:"completed"},
+        {id:"t3", date:k2, title:"보고서 제출", status:"needsAction"}
+      ]
+    };
+  }
+
+  var STORAGE_OK = (function(){
+    try{ var x="__t__"; localStorage.setItem(x,x); localStorage.removeItem(x); return true; }
+    catch(e){ return false; }
+  })();
+
+  var data = null;
+  function loadData(){
+    if(STORAGE_OK){
+      try{
+        var raw = localStorage.getItem(STORAGE_KEY);
+        if(raw) return JSON.parse(raw);
+      }catch(e){}
+    }
+    return seedData();
+  }
+  function saveData(){
+    if(!STORAGE_OK) return;
+    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }catch(e){}
+  }
+  data = loadData();
+
+  function colorHex(colorId){
+    for(var i=0;i<PALETTE.length;i++){ if(PALETTE[i].id===colorId) return PALETTE[i].hex; }
+    return "#616161";
+  }
+
+  function eventsFor(key){ return data.events.filter(function(e){ return e.date===key; }); }
+  function tasksFor(key){ return data.tasks.filter(function(t){ return t.date===key; }); }
+
+  // ---------- 상태 ----------
+  var view = new Date();
+  view.setDate(1);
+  var selectedKey = todayKey();
+
+  var monthTitle = document.getElementById("monthTitle");
+  var yearTitle = document.getElementById("yearTitle");
+  var weekdayRow = document.getElementById("weekdayRow");
+  var grid = document.getElementById("grid");
+
+  var WD = ["일","월","화","수","목","금","토"];
+  WD.forEach(function(w,i){
+    var div = document.createElement("div");
+    div.textContent = w;
+    if(i===0) div.className="sun";
+    if(i===6) div.className="sat";
+    weekdayRow.appendChild(div);
+  });
+
+  function renderCalendar(){
+    var y = view.getFullYear(), m = view.getMonth();
+    monthTitle.textContent = (m+1)+"월";
+    yearTitle.textContent = y;
+    grid.innerHTML = "";
+
+    var firstDow = new Date(y,m,1).getDay();
+    var daysInMonth = new Date(y,m+1,0).getDate();
+    var daysInPrevMonth = new Date(y,m,0).getDate();
+
+    var totalCells = Math.ceil((firstDow+daysInMonth)/7)*7;
+    var tKey = todayKey();
+
+    for(var i=0;i<totalCells;i++){
+      var dayNum, cellY=y, cellM=m, otherMonth=false;
+      if(i < firstDow){
+        dayNum = daysInPrevMonth - firstDow + 1 + i;
+        cellM = m-1; if(cellM<0){cellM=11; cellY=y-1;}
+        otherMonth = true;
+      } else if(i >= firstDow + daysInMonth){
+        dayNum = i - firstDow - daysInMonth + 1;
+        cellM = m+1; if(cellM>11){cellM=0; cellY=y+1;}
+        otherMonth = true;
+      } else {
+        dayNum = i - firstDow + 1;
+      }
+      var key = dateKey(cellY, cellM, dayNum);
+      var dow = i % 7;
+      var mmdd = key.slice(5);
+      var holidayName = FIXED_HOLIDAYS[mmdd];
+
+      var cell = document.createElement("div");
+      cell.className = "cell" + (otherMonth ? " other-month" : "");
+      cell.dataset.key = key;
+
+      var dnum = document.createElement("div");
+      dnum.className = "date-num" + (dow===0?" sun":"") + (dow===6?" sat":"") + (holidayName?" holiday":"") + (key===tKey?" today":"");
+      dnum.textContent = dayNum;
+      cell.appendChild(dnum);
+
+      if(holidayName && !otherMonth){
+        var hl = document.createElement("div");
+        hl.className = "holiday-label";
+        hl.textContent = holidayName;
+        cell.appendChild(hl);
+      }
+
+      var evs = eventsFor(key);
+      var tks = tasksFor(key);
+
+      evs.forEach(function(e){
+        var it = document.createElement("div");
+        it.className = "item event";
+        it.style.color = colorHex(e.colorId);
+        it.textContent = e.title;
+        it.style.whiteSpace = "normal";
+        cell.appendChild(it);
+      });
+      tks.forEach(function(t){
+        var it = document.createElement("div");
+        var done = t.status==="completed";
+        it.className = "item task" + (done?" done":"");
+        it.style.whiteSpace = "normal";
+        var box = document.createElement("span");
+        box.className = "box";
+        box.style.marginTop = "2px";
+        var lbl = document.createElement("span");
+        lbl.textContent = t.title;
+        it.appendChild(box); it.appendChild(lbl);
+        cell.appendChild(it);
+      });
+
+      cell.addEventListener("click", function(){
+        openSheet(this.dataset.key);
+      });
+
+      grid.appendChild(cell);
+    }
+  }
+
+  document.getElementById("prevBtn").addEventListener("click", function(){
+    view.setMonth(view.getMonth()-1); renderCalendar();
+  });
+  document.getElementById("nextBtn").addEventListener("click", function(){
+    view.setMonth(view.getMonth()+1); renderCalendar();
+  });
+  document.getElementById("todayBtn").addEventListener("click", function(){
+    view = new Date(); view.setDate(1); renderCalendar();
+  });
+
+  // ---------- 하단 시트 ----------
+  var overlay = document.getElementById("overlay");
+  var sheet = document.getElementById("sheet");
+  var sheetDateTitle = document.getElementById("sheetDateTitle");
+  var eventList = document.getElementById("eventList");
+  var taskList = document.getElementById("taskList");
+  var colorPicker = document.getElementById("colorPicker");
+  var eventInput = document.getElementById("eventInput");
+  var taskInput = document.getElementById("taskInput");
+  var selectedColorId = "9";
+
+  PALETTE.forEach(function(c){
+    var sw = document.createElement("div");
+    sw.className = "sw" + (c.id===selectedColorId ? " selected":"");
+    sw.style.background = c.hex;
+    sw.title = c.name;
+    sw.addEventListener("click", function(){
+      selectedColorId = c.id;
+      Array.prototype.forEach.call(colorPicker.children, function(el){ el.classList.remove("selected"); });
+      sw.classList.add("selected");
+    });
+    colorPicker.appendChild(sw);
+  });
+
+  function fmtSheetDate(key){
+    var parts = key.split("-").map(Number);
+    var dt = new Date(parts[0], parts[1]-1, parts[2]);
+    var wd = ["일","월","화","수","목","금","토"][dt.getDay()];
+    return (parts[1])+"월 "+parts[2]+"일 ("+wd+")";
+  }
+
+  function openSheet(key){
+    selectedKey = key;
+    sheetDateTitle.textContent = fmtSheetDate(key);
+    renderSheetLists();
+    overlay.classList.add("open");
+    sheet.classList.add("open");
+  }
+  function closeSheetFn(){
+    overlay.classList.remove("open");
+    sheet.classList.remove("open");
+  }
+  document.getElementById("closeSheet").addEventListener("click", closeSheetFn);
+  overlay.addEventListener("click", closeSheetFn);
+
+  function renderSheetLists(){
+    var evs = eventsFor(selectedKey);
+    var tks = tasksFor(selectedKey);
+
+    eventList.innerHTML = "";
+    if(evs.length===0){
+      var eh = document.createElement("div");
+      eh.className = "empty-hint"; eh.textContent = "등록된 일정이 없습니다";
+      eventList.appendChild(eh);
+    }
+    evs.forEach(function(e){
+      var row = document.createElement("div");
+      row.className = "row";
+      var sw = document.createElement("div");
+      sw.className = "swatch"; sw.style.background = colorHex(e.colorId);
+      var lbl = document.createElement("div");
+      lbl.className = "label"; lbl.style.color = colorHex(e.colorId); lbl.textContent = e.title;
+      var del = document.createElement("button");
+      del.className = "del"; del.textContent = "삭제";
+      del.addEventListener("click", function(){
+        data.events = data.events.filter(function(x){ return x.id!==e.id; });
+        saveData(); renderSheetLists(); renderCalendar();
+      });
+      row.appendChild(sw); row.appendChild(lbl); row.appendChild(del);
+      eventList.appendChild(row);
+    });
+
+    taskList.innerHTML = "";
+    if(tks.length===0){
+      var th = document.createElement("div");
+      th.className = "empty-hint"; th.textContent = "등록된 할 일이 없습니다";
+      taskList.appendChild(th);
+    }
+    tks.forEach(function(t, idx){
+      var row = document.createElement("div");
+      row.className = "task-row";
+      var box = document.createElement("div");
+      var done = t.status==="completed";
+      box.className = "box" + (done ? " checked":"");
+      box.addEventListener("click", function(){
+        t.status = done ? "needsAction" : "completed";
+        saveData(); renderSheetLists(); renderCalendar();
+      });
+      var lbl = document.createElement("div");
+      lbl.className = "label" + (done ? " done":"");
+      lbl.textContent = t.title;
+
+      var orderBtns = document.createElement("div");
+      orderBtns.className = "order-btns";
+      var up = document.createElement("button"); up.textContent="▲";
+      var down = document.createElement("button"); down.textContent="▼";
+      up.addEventListener("click", function(){ moveTask(t.id, -1); });
+      down.addEventListener("click", function(){ moveTask(t.id, 1); });
+      orderBtns.appendChild(up); orderBtns.appendChild(down);
+
+      var del = document.createElement("button");
+      del.className = "del"; del.textContent = "삭제";
+      del.addEventListener("click", function(){
+        data.tasks = data.tasks.filter(function(x){ return x.id!==t.id; });
+        saveData(); renderSheetLists(); renderCalendar();
+      });
+
+      row.appendChild(box); row.appendChild(lbl); row.appendChild(orderBtns); row.appendChild(del);
+      taskList.appendChild(row);
+    });
+  }
+
+  function moveTask(id, dir){
+    var sameDay = data.tasks.filter(function(t){ return t.date===selectedKey; });
+    var others = data.tasks.filter(function(t){ return t.date!==selectedKey; });
+    var idx = sameDay.findIndex(function(t){ return t.id===id; });
+    var swapIdx = idx+dir;
+    if(swapIdx<0 || swapIdx>=sameDay.length) return;
+    var tmp = sameDay[idx]; sameDay[idx]=sameDay[swapIdx]; sameDay[swapIdx]=tmp;
+    data.tasks = others.concat(sameDay);
+    saveData(); renderSheetLists();
+  }
+
+  document.getElementById("addEventBtn").addEventListener("click", addEvent);
+  eventInput.addEventListener("keydown", function(ev){ if(ev.key==="Enter") addEvent(); });
+  function addEvent(){
+    var text = eventInput.value.trim();
+    if(!text) return;
+    data.events.push({id:"e_"+Date.now(), date:selectedKey, title:text, colorId:selectedColorId});
+    eventInput.value = "";
+    saveData(); renderSheetLists(); renderCalendar();
+  }
+
+  document.getElementById("addTaskBtn").addEventListener("click", addTask);
+  taskInput.addEventListener("keydown", function(ev){ if(ev.key==="Enter") addTask(); });
+  function addTask(){
+    var text = taskInput.value.trim();
+    if(!text) return;
+    data.tasks.push({id:"t_"+Date.now(), date:selectedKey, title:text, status:"needsAction"});
+    taskInput.value = "";
+    saveData(); renderSheetLists(); renderCalendar();
+  }
+
+  renderCalendar();
+})();
+</script>
+</body>
+</html>
