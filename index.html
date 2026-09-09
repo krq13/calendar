@@ -124,11 +124,11 @@
   .task-row .label.done{color:var(--task-done); text-decoration:line-through;}
   .task-row .label-input{flex:1; font-size:14px; border:none; border-bottom:1px solid var(--line-strong); font-family:inherit; padding:4px 2px;}
   .task-row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
-  .task-row .order-btns{display:flex; flex-direction:column; gap:6px;}
-  .task-row .order-btns button{
+  .task-row .ord-btn{
     background:var(--panel); border:1px solid var(--line); color:var(--text-dim);
-    font-size:13px; width:28px; height:22px; border-radius:5px; padding:0; cursor:pointer; line-height:1;
+    font-size:14px; width:30px; height:30px; border-radius:6px; padding:0; cursor:pointer; flex:none;
   }
+  .sync-msg.error{color:var(--sunday); font-weight:600;}
 
   .add-row{display:flex; gap:8px; margin-top:6px;}
   .add-row input{
@@ -394,6 +394,7 @@
     var y = view.getFullYear(), m = view.getMonth();
     var rangeStart = new Date(y, m, -10);
     var rangeEnd = new Date(y, m+1, 10);
+    syncMsg.className = "sync-msg";
     syncMsg.textContent = "구글에서 불러오는 중...";
     Promise.all([
       fetchGoogleEvents(rangeStart.toISOString(), rangeEnd.toISOString()),
@@ -588,6 +589,9 @@
       lbl.style.background = eventColorHex(e);
       lbl.style.color = contrastText(eventColorHex(e));
       lbl.textContent = e.title;
+      if(signedIn){
+        lbl.textContent += "  (colorId: " + (e.colorId || "없음→캘린더 기본색 "+primaryCalHex) + ")";
+      }
       lbl.addEventListener("click", function(){
         startEditEvent(e, lbl, row);
       });
@@ -597,7 +601,7 @@
         if(signedIn && e.gid){
           gFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events/"+e.gid, {method:"DELETE"})
             .then(function(){ refreshView(); })
-            .catch(function(){});
+            .catch(function(err){ showError(err); });
         } else {
           data.events = data.events.filter(function(x){ return x.id!==e.id; });
           saveData();
@@ -627,7 +631,7 @@
             method:"PATCH",
             headers:{"Content-Type":"application/json"},
             body: JSON.stringify({status:newStatus})
-          }).then(function(){ refreshView(); }).catch(function(){});
+          }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
         } else {
           t.status = newStatus;
           saveData();
@@ -641,20 +645,21 @@
         startEditTask(t, lbl, row);
       });
 
-      var orderBtns = document.createElement("div");
-      orderBtns.className = "order-btns";
-      var up = document.createElement("button"); up.textContent="▲";
-      var down = document.createElement("button"); down.textContent="▼";
+      var up = document.createElement("button");
+      up.className = "ord-btn"; up.textContent="▲";
       up.addEventListener("click", function(){ moveTask(t, -1); });
+
+      var down = document.createElement("button");
+      down.className = "ord-btn"; down.textContent="▼";
       down.addEventListener("click", function(){ moveTask(t, 1); });
-      orderBtns.appendChild(up); orderBtns.appendChild(down);
 
       var del = document.createElement("button");
       del.className = "del"; del.textContent = "삭제";
       del.addEventListener("click", function(){
         if(signedIn && t.gid){
           gFetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid, {method:"DELETE"})
-            .then(function(){ refreshView(); }).catch(function(){});
+            .then(function(){ refreshView(); })
+            .catch(function(err){ showError(err); });
         } else {
           data.tasks = data.tasks.filter(function(x){ return x.id!==t.id; });
           saveData();
@@ -662,9 +667,14 @@
         renderSheetLists(); renderCalendar();
       });
 
-      row.appendChild(box); row.appendChild(lbl); row.appendChild(orderBtns); row.appendChild(del);
+      row.appendChild(box); row.appendChild(up); row.appendChild(lbl); row.appendChild(down); row.appendChild(del);
       taskList.appendChild(row);
     });
+  }
+
+  function showError(err){
+    syncMsg.className = "sync-msg error";
+    syncMsg.textContent = "요청 실패: " + (err && err.message ? err.message : "알 수 없는 오류");
   }
 
   function moveTask(t, dir){
@@ -680,7 +690,7 @@
         prevId = sameDay[swapIdx].gid;
       }
       var url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid+"/move" + (prevId ? ("?previous="+prevId) : "");
-      gFetch(url, {method:"POST"}).then(function(){ refreshView(); }).catch(function(){});
+      gFetch(url, {method:"POST"}).then(function(){ syncMsg.className="sync-msg"; refreshView(); }).catch(function(err){ showError(err); });
     } else {
       var others = data.tasks.filter(function(x){ return x.date!==t.date; });
       var tmp = sameDay[idx]; sameDay[idx]=sameDay[swapIdx]; sameDay[swapIdx]=tmp;
@@ -704,7 +714,7 @@
           gFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events/"+e.gid, {
             method:"PATCH", headers:{"Content-Type":"application/json"},
             body: JSON.stringify({summary:newTitle})
-          }).then(function(){ refreshView(); }).catch(function(){});
+          }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
         } else {
           e.title = newTitle; saveData(); renderSheetLists(); renderCalendar();
         }
@@ -729,7 +739,7 @@
           gFetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid, {
             method:"PATCH", headers:{"Content-Type":"application/json"},
             body: JSON.stringify({title:newTitle})
-          }).then(function(){ refreshView(); }).catch(function(){});
+          }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
         } else {
           t.title = newTitle; saveData(); renderSheetLists(); renderCalendar();
         }
@@ -755,7 +765,7 @@
           summary:text, colorId:selectedColorId,
           start:{date:selectedKey}, end:{date:nextDayStr(selectedKey)}
         })
-      }).then(function(){ refreshView(); }).catch(function(){});
+      }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
     } else {
       data.events.push({id:"e_"+Date.now(), date:selectedKey, title:text, colorId:selectedColorId});
       saveData(); renderSheetLists(); renderCalendar();
@@ -773,7 +783,7 @@
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ title:text, due: selectedKey+"T00:00:00.000Z" })
-      }).then(function(){ refreshView(); }).catch(function(){});
+      }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
     } else {
       data.tasks.push({id:"t_"+Date.now(), date:selectedKey, title:text, status:"needsAction"});
       saveData(); renderSheetLists(); renderCalendar();
