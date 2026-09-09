@@ -124,8 +124,11 @@
   .task-row .label.done{color:var(--task-done); text-decoration:line-through;}
   .task-row .label-input{flex:1; font-size:14px; border:none; border-bottom:1px solid var(--line-strong); font-family:inherit; padding:4px 2px;}
   .task-row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
-  .task-row .order-btns{display:flex; flex-direction:column;}
-  .task-row .order-btns button{background:none; border:none; color:var(--text-dim); font-size:10px; padding:1px 4px; cursor:pointer; line-height:1;}
+  .task-row .order-btns{display:flex; flex-direction:column; gap:6px;}
+  .task-row .order-btns button{
+    background:var(--panel); border:1px solid var(--line); color:var(--text-dim);
+    font-size:13px; width:28px; height:22px; border-radius:5px; padding:0; cursor:pointer; line-height:1;
+  }
 
   .add-row{display:flex; gap:8px; margin-top:6px;}
   .add-row input{
@@ -350,7 +353,15 @@
   var primaryCalHex = "#616161";
   function fetchPrimaryCalendarColor(){
     return gFetch("https://www.googleapis.com/calendar/v3/users/me/calendarList/primary").then(function(res){
-      if(res && res.backgroundColor) primaryCalHex = res.backgroundColor;
+      if(res && res.backgroundColor){ primaryCalHex = res.backgroundColor; return; }
+      return fetchPrimaryCalendarColorFallback();
+    }).catch(function(){ return fetchPrimaryCalendarColorFallback(); });
+  }
+  function fetchPrimaryCalendarColorFallback(){
+    return gFetch("https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=50").then(function(res){
+      var items = (res && res.items) || [];
+      var mine = items.filter(function(c){ return c.primary; })[0];
+      if(mine && mine.backgroundColor) primaryCalHex = mine.backgroundColor;
     }).catch(function(){});
   }
 
