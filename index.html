@@ -73,14 +73,14 @@
   .cell.other-month .item{opacity:0.45;}
   .cell:active{background:#F5F7F8;}
   .date-num{
-    font-size:10.5px; font-weight:700; width:17px; height:17px; line-height:17px;
+    font-size:9px; font-weight:700; width:14px; height:14px; line-height:14px;
     text-align:center; border-radius:50%; color:var(--text);
   }
   .date-num.sun{color:var(--sunday);}
   .date-num.sat{color:var(--saturday);}
   .date-num.holiday{color:var(--sunday);}
   .date-num.today{background:var(--today-bg); color:#fff;}
-  .holiday-label{font-size:8.5px; color:var(--sunday); font-weight:600; margin-top:-2px;}
+  .holiday-label{font-size:6.5px; color:var(--sunday); font-weight:600; margin-top:-1px;}
 
   .item{font-size:9.5px; line-height:14px; padding:1px 3px; border-radius:3px; white-space:normal; word-break:break-all;}
   .item.event{font-weight:700;}
@@ -124,9 +124,10 @@
   .task-row .label.done{color:var(--task-done); text-decoration:line-through;}
   .task-row .label-input{flex:1; font-size:14px; border:none; border-bottom:1px solid var(--line-strong); font-family:inherit; padding:4px 2px;}
   .task-row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
+  .task-row .ord-group{display:flex; flex-direction:row; gap:5px; flex:none;}
   .task-row .ord-btn{
     background:var(--panel); border:1px solid var(--line); color:var(--text-dim);
-    font-size:14px; width:30px; height:30px; border-radius:6px; padding:0; cursor:pointer; flex:none;
+    font-size:14px; width:28px; height:30px; border-radius:6px; padding:0; cursor:pointer; flex:none;
   }
   .sync-msg.error{color:var(--sunday); font-weight:600;}
 
@@ -276,8 +277,15 @@
     var lum = (0.299*r + 0.587*g + 0.114*b) / 255;
     return lum > 0.6 ? "#202124" : "#FFFFFF";
   }
+  var googleLabels = []; // 구글 계정에 등록된 커스텀 라벨: {id, name, hex}
+  function labelHex(labelId){
+    for(var i=0;i<googleLabels.length;i++){ if(googleLabels[i].id===labelId) return googleLabels[i].hex; }
+    return null;
+  }
   function eventColorHex(e){
-    return e.colorId ? colorHex(e.colorId) : primaryCalHex;
+    if(e.labelId){ var h = labelHex(e.labelId); if(h) return h; }
+    if(e.colorId) return colorHex(e.colorId);
+    return primaryCalHex;
   }
 
   function eventsFor(key){ return data.events.filter(function(e){ return e.date===key; }); }
@@ -286,11 +294,35 @@
   // ---------- 구글 로그인 / API 연동 ----------
   var CLIENT_ID = "100465518077-9ajroiu7pca779khk8ns2isjdj145fbh.apps.googleusercontent.com";
   var SCOPES = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks";
+  var TOKEN_STORAGE_KEY = "calendar_todo_google_token_v1";
   var accessToken = null;
   var signedIn = false;
   var tokenClient = null;
   var googleBtn = document.getElementById("googleBtn");
   var syncMsg = document.getElementById("syncMsg");
+
+  function saveToken(token, expiresInSec){
+    if(!STORAGE_OK) return;
+    try{
+      localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({
+        token: token, expiresAt: Date.now() + (expiresInSec||3500)*1000
+      }));
+    }catch(e){}
+  }
+  function loadCachedToken(){
+    if(!STORAGE_OK) return null;
+    try{
+      var raw = localStorage.getItem(TOKEN_STORAGE_KEY);
+      if(!raw) return null;
+      var obj = JSON.parse(raw);
+      if(obj && obj.token && obj.expiresAt - 60000 > Date.now()) return obj.token;
+    }catch(e){}
+    return null;
+  }
+  function clearCachedToken(){
+    if(!STORAGE_OK) return;
+    try{ localStorage.removeItem(TOKEN_STORAGE_KEY); }catch(e){}
+  }
 
   function nextDayStr(key){
     var p = key.split("-").map(Number);
@@ -307,11 +339,20 @@
         if(resp.error){ syncMsg.textContent = "로그인이 취소되었거나 실패했습니다."; return; }
         accessToken = resp.access_token;
         signedIn = true;
+        saveToken(resp.access_token, resp.expires_in);
         googleBtn.textContent = "구글 연결됨";
         googleBtn.classList.add("connected");
         refreshView();
       }
     });
+    var cached = loadCachedToken();
+    if(cached){
+      accessToken = cached;
+      signedIn = true;
+      googleBtn.textContent = "구글 연결됨";
+      googleBtn.classList.add("connected");
+      refreshView();
+    }
   }
   googleBtn.addEventListener("click", function(){
     if(!tokenClient){ syncMsg.textContent = "구글 로그인 준비 중입니다. 잠시 후 다시 눌러주세요."; return; }
@@ -329,11 +370,17 @@
     return fetch(url, options).then(function(r){
       if(r.status===401){
         signedIn = false; accessToken = null;
+        clearCachedToken();
         googleBtn.textContent = "구글 계정 연결"; googleBtn.classList.remove("connected");
         syncMsg.textContent = "로그인이 만료되었습니다. 다시 연결해주세요.";
         throw new Error("unauthorized");
       }
-      if(!r.ok) throw new Error("request failed: "+r.status);
+      if(!r.ok){
+        return r.json().catch(function(){ return null; }).then(function(body){
+          var msg = (body && body.error && body.error.message) ? body.error.message : ("HTTP "+r.status);
+          throw new Error(msg);
+        });
+      }
       if(r.status===204) return null;
       return r.json();
     });
@@ -345,9 +392,18 @@
       var items = (res && res.items) || [];
       return items.filter(function(it){ return it.status!=="cancelled"; }).map(function(it){
         var key = it.start && (it.start.date || (it.start.dateTime ? it.start.dateTime.slice(0,10) : null));
-        return { id:"g_"+it.id, gid:it.id, date:key, title: it.summary || "(제목 없음)", colorId: it.colorId || null };
+        return { id:"g_"+it.id, gid:it.id, date:key, title: it.summary || "(제목 없음)", colorId: it.colorId || null, labelId: it.eventLabelId || null };
       }).filter(function(e){ return !!e.date; });
     });
+  }
+
+  function fetchEventLabels(){
+    return gFetch("https://www.googleapis.com/calendar/v3/calendars/primary").then(function(res){
+      var labels = (res && res.labelProperties && res.labelProperties.eventLabels) || [];
+      googleLabels = labels.filter(function(l){ return !!l.id; }).map(function(l){
+        return { id:l.id, name:l.name || "이름없음", hex:l.backgroundColor || "#616161" };
+      });
+    }).catch(function(){ googleLabels = []; });
   }
 
   var primaryCalHex = "#616161";
@@ -400,7 +456,8 @@
       fetchGoogleEvents(rangeStart.toISOString(), rangeEnd.toISOString()),
       fetchGoogleTasks(rangeStart.toISOString(), rangeEnd.toISOString()),
       fetchPrimaryCalendarColor(),
-      fetchGoogleHolidays(rangeStart.toISOString(), rangeEnd.toISOString())
+      fetchGoogleHolidays(rangeStart.toISOString(), rangeEnd.toISOString()),
+      fetchEventLabels()
     ]).then(function(results){
       data.events = results[0];
       data.tasks = results[1];
@@ -415,6 +472,7 @@
   function refreshView(){
     if(signedIn){
       loadGoogleData(function(){
+        buildColorPicker();
         renderCalendar();
         if(sheet.classList.contains("open")) renderSheetLists();
       });
@@ -536,19 +594,43 @@
   var eventInput = document.getElementById("eventInput");
   var taskInput = document.getElementById("taskInput");
   var selectedColorId = "9";
+  var selectedLabelId = null;
 
-  PALETTE.forEach(function(c){
-    var sw = document.createElement("div");
-    sw.className = "sw" + (c.id===selectedColorId ? " selected":"");
-    sw.style.background = c.hex;
-    sw.title = c.name;
-    sw.addEventListener("click", function(){
-      selectedColorId = c.id;
-      Array.prototype.forEach.call(colorPicker.children, function(el){ el.classList.remove("selected"); });
-      sw.classList.add("selected");
-    });
-    colorPicker.appendChild(sw);
-  });
+  function buildColorPicker(){
+    colorPicker.innerHTML = "";
+    if(signedIn && googleLabels.length){
+      selectedLabelId = googleLabels[0].id;
+      selectedColorId = null;
+      googleLabels.forEach(function(c, idx){
+        var sw = document.createElement("div");
+        sw.className = "sw" + (idx===0 ? " selected":"");
+        sw.style.background = c.hex;
+        sw.title = c.name;
+        sw.addEventListener("click", function(){
+          selectedLabelId = c.id; selectedColorId = null;
+          Array.prototype.forEach.call(colorPicker.children, function(el){ el.classList.remove("selected"); });
+          sw.classList.add("selected");
+        });
+        colorPicker.appendChild(sw);
+      });
+    } else {
+      selectedColorId = "9";
+      selectedLabelId = null;
+      PALETTE.forEach(function(c, idx){
+        var sw = document.createElement("div");
+        sw.className = "sw" + (c.id===selectedColorId ? " selected":"");
+        sw.style.background = c.hex;
+        sw.title = c.name;
+        sw.addEventListener("click", function(){
+          selectedColorId = c.id; selectedLabelId = null;
+          Array.prototype.forEach.call(colorPicker.children, function(el){ el.classList.remove("selected"); });
+          sw.classList.add("selected");
+        });
+        colorPicker.appendChild(sw);
+      });
+    }
+  }
+  buildColorPicker();
 
   function fmtSheetDate(key){
     var parts = key.split("-").map(Number);
@@ -590,7 +672,8 @@
       lbl.style.color = contrastText(eventColorHex(e));
       lbl.textContent = e.title;
       if(signedIn){
-        lbl.textContent += "  (colorId: " + (e.colorId || "없음→캘린더 기본색 "+primaryCalHex) + ")";
+        var src = e.labelId ? ("라벨: "+e.labelId) : (e.colorId ? ("colorId: "+e.colorId) : ("캘린더 기본색 "+primaryCalHex));
+        lbl.textContent += "  (" + src + ")";
       }
       lbl.addEventListener("click", function(){
         startEditEvent(e, lbl, row);
@@ -645,6 +728,8 @@
         startEditTask(t, lbl, row);
       });
 
+      var ordGroup = document.createElement("div");
+      ordGroup.className = "ord-group";
       var up = document.createElement("button");
       up.className = "ord-btn"; up.textContent="▲";
       up.addEventListener("click", function(){ moveTask(t, -1); });
@@ -652,6 +737,7 @@
       var down = document.createElement("button");
       down.className = "ord-btn"; down.textContent="▼";
       down.addEventListener("click", function(){ moveTask(t, 1); });
+      ordGroup.appendChild(up); ordGroup.appendChild(down);
 
       var del = document.createElement("button");
       del.className = "del"; del.textContent = "삭제";
@@ -667,7 +753,7 @@
         renderSheetLists(); renderCalendar();
       });
 
-      row.appendChild(box); row.appendChild(up); row.appendChild(lbl); row.appendChild(down); row.appendChild(del);
+      row.appendChild(box); row.appendChild(lbl); row.appendChild(ordGroup); row.appendChild(del);
       taskList.appendChild(row);
     });
   }
@@ -758,13 +844,14 @@
     if(!text) return;
     eventInput.value = "";
     if(signedIn){
-      gFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+      var body = { summary:text, start:{date:selectedKey}, end:{date:nextDayStr(selectedKey)} };
+      var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+      if(selectedLabelId){ body.eventLabelId = selectedLabelId; url += "?eventLabelVersion=1"; }
+      else if(selectedColorId){ body.colorId = selectedColorId; }
+      gFetch(url, {
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({
-          summary:text, colorId:selectedColorId,
-          start:{date:selectedKey}, end:{date:nextDayStr(selectedKey)}
-        })
+        body: JSON.stringify(body)
       }).then(function(){ refreshView(); }).catch(function(err){ showError(err); });
     } else {
       data.events.push({id:"e_"+Date.now(), date:selectedKey, title:text, colorId:selectedColorId});
