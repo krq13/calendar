@@ -11,6 +11,7 @@
     --panel:#FAFAFA;
     --line:#E5E5E5;
     --line-strong:#D9D9D9;
+    --line-faint:#EFEFEF;
     --text:#202124;
     --text-dim:#8A8F98;
     --sunday:#D93025;
@@ -72,7 +73,7 @@
   .cell.other-month .item{opacity:0.45;}
   .cell:active{background:#F5F7F8;}
   .date-num{
-    font-size:12px; font-weight:700; width:20px; height:20px; line-height:20px;
+    font-size:10.5px; font-weight:700; width:17px; height:17px; line-height:17px;
     text-align:center; border-radius:50%; color:var(--text);
   }
   .date-num.sun{color:var(--sunday);}
@@ -85,7 +86,7 @@
   .item.event{font-weight:700;}
   .item.task{font-weight:400; color:var(--text); padding:1px 2px;}
   .item.task.done{color:var(--task-done); text-decoration:line-through;}
-  .item.task + .item.task{border-top:1px dashed var(--line-strong); margin-top:1px; padding-top:2px;}
+  .item.task + .item.task{border-top:1px dashed var(--line-faint); margin-top:1px; padding-top:2px;}
   .item.task.done .box{background:var(--task-done); border-color:var(--task-done);}
   .more-label{font-size:9px; color:var(--text-dim); padding:0 2px;}
 
@@ -123,6 +124,8 @@
   .task-row .label.done{color:var(--task-done); text-decoration:line-through;}
   .task-row .label-input{flex:1; font-size:14px; border:none; border-bottom:1px solid var(--line-strong); font-family:inherit; padding:4px 2px;}
   .task-row .del{background:none; border:none; color:var(--text-dim); font-size:13px; padding:6px; cursor:pointer;}
+  .task-row .order-btns{display:flex; flex-direction:column;}
+  .task-row .order-btns button{background:none; border:none; color:var(--text-dim); font-size:10px; padding:1px 4px; cursor:pointer; line-height:1;}
 
   .add-row{display:flex; gap:8px; margin-top:6px;}
   .add-row input{
@@ -151,7 +154,10 @@
     </div>
     <div class="sub-row">
       <button class="today-btn" id="todayBtn">오늘</button>
-      <button class="gbtn" id="googleBtn">구글 계정 연결</button>
+      <div style="display:flex; gap:6px;">
+        <button class="gbtn" id="syncBtn" style="background:var(--panel); color:var(--text-dim); border:1px solid var(--line);">↻ 동기화</button>
+        <button class="gbtn" id="googleBtn">구글 계정 연결</button>
+      </div>
     </div>
     <div class="sync-msg" id="syncMsg"></div>
   </header>
@@ -267,6 +273,9 @@
     var lum = (0.299*r + 0.587*g + 0.114*b) / 255;
     return lum > 0.6 ? "#202124" : "#FFFFFF";
   }
+  function eventColorHex(e){
+    return e.colorId ? colorHex(e.colorId) : primaryCalHex;
+  }
 
   function eventsFor(key){ return data.events.filter(function(e){ return e.date===key; }); }
   function tasksFor(key){ return data.tasks.filter(function(t){ return t.date===key; }); }
@@ -305,6 +314,10 @@
     if(!tokenClient){ syncMsg.textContent = "구글 로그인 준비 중입니다. 잠시 후 다시 눌러주세요."; return; }
     tokenClient.requestAccessToken({ prompt: signedIn ? "" : "consent" });
   });
+  document.getElementById("syncBtn").addEventListener("click", function(){
+    if(!signedIn){ syncMsg.textContent = "먼저 구글 계정을 연결해주세요."; return; }
+    refreshView();
+  });
 
   function gFetch(url, options){
     options = options || {};
@@ -329,9 +342,31 @@
       var items = (res && res.items) || [];
       return items.filter(function(it){ return it.status!=="cancelled"; }).map(function(it){
         var key = it.start && (it.start.date || (it.start.dateTime ? it.start.dateTime.slice(0,10) : null));
-        return { id:"g_"+it.id, gid:it.id, date:key, title: it.summary || "(제목 없음)", colorId: it.colorId || "8" };
+        return { id:"g_"+it.id, gid:it.id, date:key, title: it.summary || "(제목 없음)", colorId: it.colorId || null };
       }).filter(function(e){ return !!e.date; });
     });
+  }
+
+  var primaryCalHex = "#616161";
+  function fetchPrimaryCalendarColor(){
+    return gFetch("https://www.googleapis.com/calendar/v3/users/me/calendarList/primary").then(function(res){
+      if(res && res.backgroundColor) primaryCalHex = res.backgroundColor;
+    }).catch(function(){});
+  }
+
+  var googleHolidays = {};
+  function fetchGoogleHolidays(timeMin, timeMax){
+    var calId = encodeURIComponent("ko.south_korea#holiday@group.v.calendar.google.com");
+    var url = "https://www.googleapis.com/calendar/v3/calendars/"+calId+"/events?singleEvents=true&orderBy=startTime&maxResults=100&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax);
+    return gFetch(url).then(function(res){
+      var items = (res && res.items) || [];
+      var map = {};
+      items.forEach(function(it){
+        var key = it.start && (it.start.date || (it.start.dateTime && it.start.dateTime.slice(0,10)));
+        if(key) map[key] = it.summary;
+      });
+      googleHolidays = map;
+    }).catch(function(){ googleHolidays = {}; });
   }
 
   function fetchGoogleTasks(dueMin, dueMax){
@@ -351,7 +386,9 @@
     syncMsg.textContent = "구글에서 불러오는 중...";
     Promise.all([
       fetchGoogleEvents(rangeStart.toISOString(), rangeEnd.toISOString()),
-      fetchGoogleTasks(rangeStart.toISOString(), rangeEnd.toISOString())
+      fetchGoogleTasks(rangeStart.toISOString(), rangeEnd.toISOString()),
+      fetchPrimaryCalendarColor(),
+      fetchGoogleHolidays(rangeStart.toISOString(), rangeEnd.toISOString())
     ]).then(function(results){
       data.events = results[0];
       data.tasks = results[1];
@@ -422,7 +459,7 @@
       var key = dateKey(cellY, cellM, dayNum);
       var dow = i % 7;
       var mmdd = key.slice(5);
-      var holidayName = FIXED_HOLIDAYS[mmdd];
+      var holidayName = signedIn ? googleHolidays[key] : FIXED_HOLIDAYS[mmdd];
 
       var cell = document.createElement("div");
       cell.className = "cell" + (otherMonth ? " other-month" : "");
@@ -446,8 +483,8 @@
       evs.forEach(function(e){
         var it = document.createElement("div");
         it.className = "item event";
-        it.style.background = colorHex(e.colorId);
-        it.style.color = contrastText(colorHex(e.colorId));
+        it.style.background = eventColorHex(e);
+        it.style.color = contrastText(eventColorHex(e));
         it.textContent = e.title;
         cell.appendChild(it);
       });
@@ -537,8 +574,8 @@
       row.className = "row";
       var lbl = document.createElement("div");
       lbl.className = "label";
-      lbl.style.background = colorHex(e.colorId);
-      lbl.style.color = contrastText(colorHex(e.colorId));
+      lbl.style.background = eventColorHex(e);
+      lbl.style.color = contrastText(eventColorHex(e));
       lbl.textContent = e.title;
       lbl.addEventListener("click", function(){
         startEditEvent(e, lbl, row);
@@ -593,6 +630,14 @@
         startEditTask(t, lbl, row);
       });
 
+      var orderBtns = document.createElement("div");
+      orderBtns.className = "order-btns";
+      var up = document.createElement("button"); up.textContent="▲";
+      var down = document.createElement("button"); down.textContent="▼";
+      up.addEventListener("click", function(){ moveTask(t, -1); });
+      down.addEventListener("click", function(){ moveTask(t, 1); });
+      orderBtns.appendChild(up); orderBtns.appendChild(down);
+
       var del = document.createElement("button");
       del.className = "del"; del.textContent = "삭제";
       del.addEventListener("click", function(){
@@ -606,17 +651,39 @@
         renderSheetLists(); renderCalendar();
       });
 
-      row.appendChild(box); row.appendChild(lbl); row.appendChild(del);
+      row.appendChild(box); row.appendChild(lbl); row.appendChild(orderBtns); row.appendChild(del);
       taskList.appendChild(row);
     });
+  }
+
+  function moveTask(t, dir){
+    var sameDay = tasksFor(t.date);
+    var idx = sameDay.findIndex(function(x){ return x.id===t.id; });
+    var swapIdx = idx+dir;
+    if(swapIdx<0 || swapIdx>=sameDay.length) return;
+    if(signedIn && t.gid){
+      var prevId;
+      if(dir===-1){
+        prevId = (swapIdx-1>=0) ? sameDay[swapIdx-1].gid : null;
+      } else {
+        prevId = sameDay[swapIdx].gid;
+      }
+      var url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid+"/move" + (prevId ? ("?previous="+prevId) : "");
+      gFetch(url, {method:"POST"}).then(function(){ refreshView(); }).catch(function(){});
+    } else {
+      var others = data.tasks.filter(function(x){ return x.date!==t.date; });
+      var tmp = sameDay[idx]; sameDay[idx]=sameDay[swapIdx]; sameDay[swapIdx]=tmp;
+      data.tasks = others.concat(sameDay);
+      saveData(); renderSheetLists();
+    }
   }
 
   function startEditEvent(e, lbl, row){
     var input = document.createElement("input");
     input.className = "label-input";
     input.value = e.title;
-    input.style.background = colorHex(e.colorId);
-    input.style.color = contrastText(colorHex(e.colorId));
+    input.style.background = eventColorHex(e);
+    input.style.color = contrastText(eventColorHex(e));
     row.replaceChild(input, lbl);
     input.focus(); input.select();
     function commit(){
