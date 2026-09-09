@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>캘린더 · 할 일</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
     --bg:#FFFFFF;
@@ -48,6 +49,9 @@
     font-size:12px; color:var(--text-dim); padding:5px 12px; cursor:pointer;
   }
   .demo-badge{font-size:11px; color:var(--text-dim); background:var(--panel); border:1px solid var(--line); border-radius:20px; padding:5px 10px;}
+  .gbtn{font-size:11px; font-weight:700; color:#fff; background:var(--accent); border:none; border-radius:20px; padding:6px 12px; cursor:pointer;}
+  .gbtn.connected{color:var(--text-dim); background:var(--panel); border:1px solid var(--line); font-weight:500;}
+  .sync-msg{font-size:10.5px; color:var(--text-dim); text-align:center; padding:3px 0 0;}
 
   /* ---- Weekday header ---- */
   .weekday-row{display:grid; grid-template-columns:repeat(7,1fr); padding:6px 4px 2px;}
@@ -150,8 +154,9 @@
     </div>
     <div class="sub-row">
       <button class="today-btn" id="todayBtn">오늘</button>
-      <span class="demo-badge">샘플 데이터 · 구글 연동 예정</span>
+      <button class="gbtn" id="googleBtn">구글 계정 연결</button>
     </div>
+    <div class="sync-msg" id="syncMsg"></div>
   </header>
   <div class="weekday-row" id="weekdayRow"></div>
   <div class="grid" id="grid"></div>
@@ -264,6 +269,109 @@
   function eventsFor(key){ return data.events.filter(function(e){ return e.date===key; }); }
   function tasksFor(key){ return data.tasks.filter(function(t){ return t.date===key; }); }
 
+  // ---------- 구글 로그인 / API 연동 ----------
+  var CLIENT_ID = "100465518077-9ajroiu7pca779khk8ns2isjdj145fbh.apps.googleusercontent.com";
+  var SCOPES = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/tasks";
+  var accessToken = null;
+  var signedIn = false;
+  var tokenClient = null;
+  var googleBtn = document.getElementById("googleBtn");
+  var syncMsg = document.getElementById("syncMsg");
+
+  function nextDayStr(key){
+    var p = key.split("-").map(Number);
+    var d = new Date(p[0], p[1]-1, p[2]+1);
+    return dateKey(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function initGoogle(){
+    if(!window.google || !google.accounts){ setTimeout(initGoogle, 300); return; }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: function(resp){
+        if(resp.error){ syncMsg.textContent = "로그인이 취소되었거나 실패했습니다."; return; }
+        accessToken = resp.access_token;
+        signedIn = true;
+        googleBtn.textContent = "구글 연결됨";
+        googleBtn.classList.add("connected");
+        refreshView();
+      }
+    });
+  }
+  googleBtn.addEventListener("click", function(){
+    if(!tokenClient){ syncMsg.textContent = "구글 로그인 준비 중입니다. 잠시 후 다시 눌러주세요."; return; }
+    tokenClient.requestAccessToken({ prompt: signedIn ? "" : "consent" });
+  });
+
+  function gFetch(url, options){
+    options = options || {};
+    options.headers = options.headers || {};
+    options.headers["Authorization"] = "Bearer " + accessToken;
+    return fetch(url, options).then(function(r){
+      if(r.status===401){
+        signedIn = false; accessToken = null;
+        googleBtn.textContent = "구글 계정 연결"; googleBtn.classList.remove("connected");
+        syncMsg.textContent = "로그인이 만료되었습니다. 다시 연결해주세요.";
+        throw new Error("unauthorized");
+      }
+      if(!r.ok) throw new Error("request failed: "+r.status);
+      if(r.status===204) return null;
+      return r.json();
+    });
+  }
+
+  function fetchGoogleEvents(timeMin, timeMax){
+    var url = "https://www.googleapis.com/calendar/v3/calendars/primary/events?singleEvents=true&orderBy=startTime&maxResults=250&timeMin="+encodeURIComponent(timeMin)+"&timeMax="+encodeURIComponent(timeMax);
+    return gFetch(url).then(function(res){
+      var items = (res && res.items) || [];
+      return items.filter(function(it){ return it.status!=="cancelled"; }).map(function(it){
+        var key = it.start && (it.start.date || (it.start.dateTime ? it.start.dateTime.slice(0,10) : null));
+        return { id:"g_"+it.id, gid:it.id, date:key, title: it.summary || "(제목 없음)", colorId: it.colorId || "8" };
+      }).filter(function(e){ return !!e.date; });
+    });
+  }
+
+  function fetchGoogleTasks(dueMin, dueMax){
+    var url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks?showCompleted=true&showHidden=true&maxResults=100&dueMin="+encodeURIComponent(dueMin)+"&dueMax="+encodeURIComponent(dueMax);
+    return gFetch(url).then(function(res){
+      var items = (res && res.items) || [];
+      return items.filter(function(it){ return !!it.due; }).map(function(it){
+        return { id:"g_"+it.id, gid:it.id, date: it.due.slice(0,10), title: it.title || "(제목 없음)", status: it.status || "needsAction" };
+      });
+    });
+  }
+
+  function loadGoogleData(cb){
+    var y = view.getFullYear(), m = view.getMonth();
+    var rangeStart = new Date(y, m, -10);
+    var rangeEnd = new Date(y, m+1, 10);
+    syncMsg.textContent = "구글에서 불러오는 중...";
+    Promise.all([
+      fetchGoogleEvents(rangeStart.toISOString(), rangeEnd.toISOString()),
+      fetchGoogleTasks(rangeStart.toISOString(), rangeEnd.toISOString())
+    ]).then(function(results){
+      data.events = results[0];
+      data.tasks = results[1];
+      syncMsg.textContent = "";
+      if(cb) cb();
+    }).catch(function(err){
+      if(err.message!=="unauthorized"){ syncMsg.textContent = "동기화에 실패했습니다."; }
+      if(cb) cb();
+    });
+  }
+
+  function refreshView(){
+    if(signedIn){
+      loadGoogleData(function(){
+        renderCalendar();
+        if(sheet.classList.contains("open")) renderSheetLists();
+      });
+    } else {
+      renderCalendar();
+    }
+  }
+
   // ---------- 상태 ----------
   var view = new Date();
   view.setDate(1);
@@ -364,13 +472,13 @@
   }
 
   document.getElementById("prevBtn").addEventListener("click", function(){
-    view.setMonth(view.getMonth()-1); renderCalendar();
+    view.setMonth(view.getMonth()-1); refreshView();
   });
   document.getElementById("nextBtn").addEventListener("click", function(){
-    view.setMonth(view.getMonth()+1); renderCalendar();
+    view.setMonth(view.getMonth()+1); refreshView();
   });
   document.getElementById("todayBtn").addEventListener("click", function(){
-    view = new Date(); view.setDate(1); renderCalendar();
+    view = new Date(); view.setDate(1); refreshView();
   });
 
   // ---------- 하단 시트 ----------
@@ -438,8 +546,15 @@
       var del = document.createElement("button");
       del.className = "del"; del.textContent = "삭제";
       del.addEventListener("click", function(){
-        data.events = data.events.filter(function(x){ return x.id!==e.id; });
-        saveData(); renderSheetLists(); renderCalendar();
+        if(signedIn && e.gid){
+          gFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events/"+e.gid, {method:"DELETE"})
+            .then(function(){ refreshView(); })
+            .catch(function(){});
+        } else {
+          data.events = data.events.filter(function(x){ return x.id!==e.id; });
+          saveData();
+        }
+        renderSheetLists(); renderCalendar();
       });
       row.appendChild(sw); row.appendChild(lbl); row.appendChild(del);
       eventList.appendChild(row);
@@ -458,8 +573,18 @@
       var done = t.status==="completed";
       box.className = "box" + (done ? " checked":"");
       box.addEventListener("click", function(){
-        t.status = done ? "needsAction" : "completed";
-        saveData(); renderSheetLists(); renderCalendar();
+        var newStatus = done ? "needsAction" : "completed";
+        if(signedIn && t.gid){
+          gFetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid, {
+            method:"PATCH",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({status:newStatus})
+          }).then(function(){ refreshView(); }).catch(function(){});
+        } else {
+          t.status = newStatus;
+          saveData();
+        }
+        renderSheetLists(); renderCalendar();
       });
       var lbl = document.createElement("div");
       lbl.className = "label" + (done ? " done":"");
@@ -467,17 +592,25 @@
 
       var orderBtns = document.createElement("div");
       orderBtns.className = "order-btns";
-      var up = document.createElement("button"); up.textContent="▲";
-      var down = document.createElement("button"); down.textContent="▼";
-      up.addEventListener("click", function(){ moveTask(t.id, -1); });
-      down.addEventListener("click", function(){ moveTask(t.id, 1); });
-      orderBtns.appendChild(up); orderBtns.appendChild(down);
+      if(!signedIn){
+        var up = document.createElement("button"); up.textContent="▲";
+        var down = document.createElement("button"); down.textContent="▼";
+        up.addEventListener("click", function(){ moveTask(t.id, -1); });
+        down.addEventListener("click", function(){ moveTask(t.id, 1); });
+        orderBtns.appendChild(up); orderBtns.appendChild(down);
+      }
 
       var del = document.createElement("button");
       del.className = "del"; del.textContent = "삭제";
       del.addEventListener("click", function(){
-        data.tasks = data.tasks.filter(function(x){ return x.id!==t.id; });
-        saveData(); renderSheetLists(); renderCalendar();
+        if(signedIn && t.gid){
+          gFetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid, {method:"DELETE"})
+            .then(function(){ refreshView(); }).catch(function(){});
+        } else {
+          data.tasks = data.tasks.filter(function(x){ return x.id!==t.id; });
+          saveData();
+        }
+        renderSheetLists(); renderCalendar();
       });
 
       row.appendChild(box); row.appendChild(lbl); row.appendChild(orderBtns); row.appendChild(del);
@@ -501,9 +634,20 @@
   function addEvent(){
     var text = eventInput.value.trim();
     if(!text) return;
-    data.events.push({id:"e_"+Date.now(), date:selectedKey, title:text, colorId:selectedColorId});
     eventInput.value = "";
-    saveData(); renderSheetLists(); renderCalendar();
+    if(signedIn){
+      gFetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          summary:text, colorId:selectedColorId,
+          start:{date:selectedKey}, end:{date:nextDayStr(selectedKey)}
+        })
+      }).then(function(){ refreshView(); }).catch(function(){});
+    } else {
+      data.events.push({id:"e_"+Date.now(), date:selectedKey, title:text, colorId:selectedColorId});
+      saveData(); renderSheetLists(); renderCalendar();
+    }
   }
 
   document.getElementById("addTaskBtn").addEventListener("click", addTask);
@@ -511,11 +655,20 @@
   function addTask(){
     var text = taskInput.value.trim();
     if(!text) return;
-    data.tasks.push({id:"t_"+Date.now(), date:selectedKey, title:text, status:"needsAction"});
     taskInput.value = "";
-    saveData(); renderSheetLists(); renderCalendar();
+    if(signedIn){
+      gFetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ title:text, due: selectedKey+"T00:00:00.000Z" })
+      }).then(function(){ refreshView(); }).catch(function(){});
+    } else {
+      data.tasks.push({id:"t_"+Date.now(), date:selectedKey, title:text, status:"needsAction"});
+      saveData(); renderSheetLists(); renderCalendar();
+    }
   }
 
+  initGoogle();
   renderCalendar();
 })();
 </script>
