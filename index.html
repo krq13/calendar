@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
-<title>캘린더 · 할 일</title>
+<title>calendar</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   :root{
@@ -29,7 +29,7 @@
     height:100%;
     overscroll-behavior-y:none;
   }
-  #app{max-width:480px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--bg);}
+  #app{max-width:clamp(360px, 95vw, 820px); margin:0 auto; min-height:100vh; display:flex; flex-direction:column; background:var(--bg);}
 
   /* ---- Header ---- */
   header{
@@ -73,7 +73,7 @@
   .cell.other-month .item{opacity:0.45;}
   .cell:active{background:#F5F7F8;}
   .date-num{
-    font-size:7.5px; font-weight:700; width:12px; height:12px; line-height:12px;
+    font-size:6.5px; font-weight:700; width:10px; height:10px; line-height:10px;
     text-align:center; border-radius:50%; color:var(--text);
   }
   .date-num.sun{color:var(--sunday);}
@@ -82,7 +82,7 @@
   .date-num.today{background:var(--today-bg); color:#fff;}
   .holiday-label{font-size:6.5px; color:var(--sunday); font-weight:600; margin-top:-1px;}
 
-  .item{font-size:9.5px; line-height:14px; padding:1px 3px; border-radius:3px; white-space:normal; word-break:break-all;}
+  .item{font-size:8px; line-height:11px; padding:1px 3px; border-radius:3px; white-space:normal; word-break:break-all;}
   .item.event{font-weight:700;}
   .item.task{font-weight:400; color:var(--text); padding:1px 2px;}
   .item.task.done{color:var(--task-done); text-decoration:line-through;}
@@ -94,7 +94,7 @@
   .overlay{position:fixed; inset:0; background:rgba(0,0,0,0.35); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:10;}
   .overlay.open{opacity:1; pointer-events:auto;}
   .sheet{
-    position:fixed; left:0; right:0; bottom:0; max-width:480px; margin:0 auto;
+    position:fixed; left:0; right:0; bottom:0; max-width:clamp(360px, 95vw, 820px); margin:0 auto;
     background:#fff; border-radius:var(--sheet-radius) var(--sheet-radius) 0 0;
     transform:translateY(100%); transition:transform .25s cubic-bezier(.32,.72,0,1);
     z-index:11; max-height:85vh; display:flex; flex-direction:column;
