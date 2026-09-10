@@ -73,7 +73,7 @@
   .cell.other-month .item{opacity:0.45;}
   .cell:active{background:#F5F7F8;}
   .date-num{
-    font-size:9px; font-weight:700; width:14px; height:14px; line-height:14px;
+    font-size:7.5px; font-weight:700; width:12px; height:12px; line-height:12px;
     text-align:center; border-radius:50%; color:var(--text);
   }
   .date-num.sun{color:var(--sunday);}
@@ -289,7 +289,30 @@
   }
 
   function eventsFor(key){ return data.events.filter(function(e){ return e.date===key; }); }
-  function tasksFor(key){ return data.tasks.filter(function(t){ return t.date===key; }); }
+  var TASK_ORDER_KEY = "calendar_todo_task_order_v1";
+  var taskOrderMap = {};
+  (function loadTaskOrder(){
+    if(!STORAGE_OK) return;
+    try{ var raw = localStorage.getItem(TASK_ORDER_KEY); if(raw) taskOrderMap = JSON.parse(raw); }catch(e){}
+  })();
+  function saveTaskOrder(){
+    if(!STORAGE_OK) return;
+    try{ localStorage.setItem(TASK_ORDER_KEY, JSON.stringify(taskOrderMap)); }catch(e){}
+  }
+  function applyTaskOrder(key, arr){
+    var order = taskOrderMap[key];
+    if(!order || !order.length) return arr;
+    var byId = {};
+    arr.forEach(function(t){ byId[t.id] = t; });
+    var ordered = [];
+    order.forEach(function(id){ if(byId[id]){ ordered.push(byId[id]); delete byId[id]; } });
+    Object.keys(byId).forEach(function(id){ ordered.push(byId[id]); });
+    return ordered;
+  }
+  function tasksFor(key){
+    var arr = data.tasks.filter(function(t){ return t.date===key; });
+    return applyTaskOrder(key, arr);
+  }
 
   // ---------- 구글 로그인 / API 연동 ----------
   var CLIENT_ID = "100465518077-9ajroiu7pca779khk8ns2isjdj145fbh.apps.googleusercontent.com";
@@ -671,10 +694,6 @@
       lbl.style.background = eventColorHex(e);
       lbl.style.color = contrastText(eventColorHex(e));
       lbl.textContent = e.title;
-      if(signedIn){
-        var src = e.labelId ? ("라벨: "+e.labelId) : (e.colorId ? ("colorId: "+e.colorId) : ("캘린더 기본색 "+primaryCalHex));
-        lbl.textContent += "  (" + src + ")";
-      }
       lbl.addEventListener("click", function(){
         startEditEvent(e, lbl, row);
       });
@@ -768,21 +787,11 @@
     var idx = sameDay.findIndex(function(x){ return x.id===t.id; });
     var swapIdx = idx+dir;
     if(swapIdx<0 || swapIdx>=sameDay.length) return;
-    if(signedIn && t.gid){
-      var prevId;
-      if(dir===-1){
-        prevId = (swapIdx-1>=0) ? sameDay[swapIdx-1].gid : null;
-      } else {
-        prevId = sameDay[swapIdx].gid;
-      }
-      var url = "https://tasks.googleapis.com/tasks/v1/lists/@default/tasks/"+t.gid+"/move" + (prevId ? ("?previous="+prevId) : "");
-      gFetch(url, {method:"POST"}).then(function(){ syncMsg.className="sync-msg"; refreshView(); }).catch(function(err){ showError(err); });
-    } else {
-      var others = data.tasks.filter(function(x){ return x.date!==t.date; });
-      var tmp = sameDay[idx]; sameDay[idx]=sameDay[swapIdx]; sameDay[swapIdx]=tmp;
-      data.tasks = others.concat(sameDay);
-      saveData(); renderSheetLists();
-    }
+    var tmp = sameDay[idx]; sameDay[idx]=sameDay[swapIdx]; sameDay[swapIdx]=tmp;
+    taskOrderMap[t.date] = sameDay.map(function(x){ return x.id; });
+    saveTaskOrder();
+    renderSheetLists();
+    renderCalendar();
   }
 
   function startEditEvent(e, lbl, row){
